@@ -317,6 +317,22 @@ class MigrateTests(unittest.TestCase):
         unlock_mock.assert_called_once()
         self.assertEqual(secret_mock.call_count, 2)
 
+    def test_resolve_safe_storage_secrets_raises_helpful_error_on_keychain_failure(self):
+        args = SimpleNamespace(
+            brave_safe_storage=None,
+            helium_safe_storage=None,
+            keychain_password="pw",
+            keychain_path=Path("/tmp/login.keychain-db"),
+        )
+        with mock.patch.dict(MODULE.os.environ, {}, clear=False), mock.patch.object(
+            MODULE, "unlock_keychain", side_effect=MODULE.subprocess.CalledProcessError(1, ["security"])
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                MODULE.resolve_safe_storage_secrets(args)
+        self.assertIn("Unable to resolve Brave/Helium safe-storage secrets", str(ctx.exception))
+        self.assertIn("Brave Safe Storage", str(ctx.exception))
+        self.assertIn("Helium Storage Key", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

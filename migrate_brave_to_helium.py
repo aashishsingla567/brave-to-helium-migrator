@@ -199,6 +199,30 @@ def keychain_secret(keychain: Path, service: str, account: str) -> str:
     return result.stdout.strip()
 
 
+def safe_storage_help_text() -> str:
+    return (
+        "Unable to resolve Brave/Helium safe-storage secrets non-interactively.\n"
+        "\n"
+        "For truly zero-prompt runs, provide these two values explicitly:\n"
+        "  1. Brave Safe Storage / account Brave\n"
+        "  2. Helium Storage Key / account Helium\n"
+        "\n"
+        "How to get them in Keychain Access:\n"
+        "  1. Open Keychain Access\n"
+        "  2. Search for 'Brave Safe Storage'\n"
+        "  3. Open the item whose account is 'Brave' and show the password\n"
+        "  4. Search for 'Helium Storage Key'\n"
+        "  5. Open the item whose account is 'Helium' and show the password\n"
+        "\n"
+        "Then rerun with either:\n"
+        "  BRAVE_SAFE_STORAGE='...' HELIUM_SAFE_STORAGE='...' python3 migrate_brave_to_helium.py\n"
+        "or:\n"
+        "  python3 migrate_brave_to_helium.py --brave-safe-storage '...' --helium-safe-storage '...'\n"
+        "\n"
+        "Note: --keychain-password only unlocks the login keychain. macOS may still prompt for per-item access."
+    )
+
+
 def resolve_safe_storage_secrets(args):
     brave_secret = args.brave_safe_storage or os.environ.get("BRAVE_SAFE_STORAGE")
     helium_secret = args.helium_safe_storage or os.environ.get("HELIUM_SAFE_STORAGE")
@@ -206,16 +230,19 @@ def resolve_safe_storage_secrets(args):
     if brave_secret and helium_secret:
         return brave_secret, helium_secret
 
-    unlock_keychain(args.keychain_path, args.keychain_password)
+    try:
+        unlock_keychain(args.keychain_path, args.keychain_password)
 
-    if not brave_secret:
-        brave_secret = keychain_secret(
-            args.keychain_path, BRAVE_SAFE_STORAGE_SERVICE, BRAVE_SAFE_STORAGE_ACCOUNT
-        )
-    if not helium_secret:
-        helium_secret = keychain_secret(
-            args.keychain_path, HELIUM_SAFE_STORAGE_SERVICE, HELIUM_SAFE_STORAGE_ACCOUNT
-        )
+        if not brave_secret:
+            brave_secret = keychain_secret(
+                args.keychain_path, BRAVE_SAFE_STORAGE_SERVICE, BRAVE_SAFE_STORAGE_ACCOUNT
+            )
+        if not helium_secret:
+            helium_secret = keychain_secret(
+                args.keychain_path, HELIUM_SAFE_STORAGE_SERVICE, HELIUM_SAFE_STORAGE_ACCOUNT
+            )
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(safe_storage_help_text()) from exc
 
     return brave_secret, helium_secret
 

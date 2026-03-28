@@ -40,6 +40,17 @@ python3 migrate_brave_to_helium.py \
   --helium-safe-storage 'your-helium-safe-storage'
 ```
 
+How to get those two values:
+
+```text
+1. Open Keychain Access
+2. Search for "Brave Safe Storage"
+3. Open the item whose account is "Brave" and click "Show password"
+4. Search for "Helium Storage Key"
+5. Open the item whose account is "Helium" and click "Show password"
+6. Use those two passwords with the env vars or flags above
+```
+
 Run the test suite:
 
 ```bash
