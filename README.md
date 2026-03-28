@@ -24,6 +24,22 @@ Usage:
 python3 migrate_brave_to_helium.py
 ```
 
+Zero-prompt mode:
+
+```bash
+BRAVE_SAFE_STORAGE='your-brave-safe-storage' \
+HELIUM_SAFE_STORAGE='your-helium-safe-storage' \
+python3 migrate_brave_to_helium.py
+```
+
+Or with explicit flags:
+
+```bash
+python3 migrate_brave_to_helium.py \
+  --brave-safe-storage 'your-brave-safe-storage' \
+  --helium-safe-storage 'your-helium-safe-storage'
+```
+
 Run the test suite:
 
 ```bash
@@ -42,6 +58,7 @@ Useful flags:
 python3 migrate_brave_to_helium.py --profiles Default,Profile\\ 4
 python3 migrate_brave_to_helium.py --include-site-storage
 python3 migrate_brave_to_helium.py --keychain-password 'your-password'
+python3 migrate_brave_to_helium.py --brave-safe-storage '...' --helium-safe-storage '...'
 python3 migrate_brave_to_helium.py --no-launch
 ```
 
@@ -50,3 +67,4 @@ Notes:
 - Some Chromium stores can carry `v10` blobs that are not standard AES-CBC payloads. Those bytes are preserved unchanged instead of aborting the migration.
 - `--include-site-storage` copies heavier browser storage trees too. Leave it off unless you specifically want that extra state and accept the higher compatibility risk.
 - `smoke_test.py` is intentionally separate from the default unit suite because it uses the real Keychain, the real Helium binary, and a real disposable migrated profile.
+- `--keychain-password` only unlocks the login keychain. macOS may still show per-item Keychain prompts. If you need truly non-interactive runs, use `--brave-safe-storage` and `--helium-safe-storage` or the corresponding environment variables.

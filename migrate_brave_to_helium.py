@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -21,7 +22,6 @@ DEFAULT_BRAVE_ROOT = HOME / "Library/Application Support/BraveSoftware/Brave-Bro
 DEFAULT_HELIUM_ROOT = HOME / "Library/Application Support/net.imput.helium"
 DEFAULT_HELIUM_BINARY = Path("/Applications/Helium.app/Contents/MacOS/Helium")
 DEFAULT_KEYCHAIN = HOME / "Library/Keychains/login.keychain-db"
-DEFAULT_SECRET_CACHE = HOME / ".config/brave-to-helium-migrator/secrets.json"
 
 BRAVE_SAFE_STORAGE_SERVICE = "Brave Safe Storage"
 BRAVE_SAFE_STORAGE_ACCOUNT = "Brave"
@@ -199,35 +199,11 @@ def keychain_secret(keychain: Path, service: str, account: str) -> str:
     return result.stdout.strip()
 
 
-def load_secret_cache(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text())
-
-
-def write_secret_cache(path: Path, payload: dict):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2))
-    path.chmod(0o600)
-
-
 def resolve_safe_storage_secrets(args):
-    cache = load_secret_cache(args.secret_cache_path)
-    brave_secret = args.brave_safe_storage or cache.get("brave_safe_storage")
-    helium_secret = args.helium_safe_storage or cache.get("helium_safe_storage")
+    brave_secret = args.brave_safe_storage or os.environ.get("BRAVE_SAFE_STORAGE")
+    helium_secret = args.helium_safe_storage or os.environ.get("HELIUM_SAFE_STORAGE")
 
     if brave_secret and helium_secret:
-        if (
-            cache.get("brave_safe_storage") != brave_secret
-            or cache.get("helium_safe_storage") != helium_secret
-        ):
-            write_secret_cache(
-                args.secret_cache_path,
-                {
-                    "brave_safe_storage": brave_secret,
-                    "helium_safe_storage": helium_secret,
-                },
-            )
         return brave_secret, helium_secret
 
     unlock_keychain(args.keychain_path, args.keychain_password)
@@ -241,13 +217,6 @@ def resolve_safe_storage_secrets(args):
             args.keychain_path, HELIUM_SAFE_STORAGE_SERVICE, HELIUM_SAFE_STORAGE_ACCOUNT
         )
 
-    write_secret_cache(
-        args.secret_cache_path,
-        {
-            "brave_safe_storage": brave_secret,
-            "helium_safe_storage": helium_secret,
-        },
-    )
     return brave_secret, helium_secret
 
 
@@ -624,7 +593,6 @@ def parse_args():
     parser.add_argument("--include-site-storage", action="store_true")
     parser.add_argument("--keychain-password")
     parser.add_argument("--keychain-path", type=Path, default=DEFAULT_KEYCHAIN)
-    parser.add_argument("--secret-cache-path", type=Path, default=DEFAULT_SECRET_CACHE)
     parser.add_argument("--brave-safe-storage")
     parser.add_argument("--helium-safe-storage")
     parser.add_argument("--no-backup", action="store_true")
