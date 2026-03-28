@@ -30,6 +30,12 @@ Run the test suite:
 python3 -m unittest discover -s tests
 ```
 
+Run the disposable end-to-end smoke test:
+
+```bash
+python3 smoke_test.py --keychain-password 'your-password'
+```
+
 Useful flags:
 
 ```bash
@@ -43,3 +49,4 @@ Notes:
 - The script keeps Helium's destination schemas and imports shared tables instead of replacing the DB files wholesale.
 - Some Chromium stores can carry `v10` blobs that are not standard AES-CBC payloads. Those bytes are preserved unchanged instead of aborting the migration.
 - `--include-site-storage` copies heavier browser storage trees too. Leave it off unless you specifically want that extra state and accept the higher compatibility risk.
+- `smoke_test.py` is intentionally separate from the default unit suite because it uses the real Keychain, the real Helium binary, and a real disposable migrated profile.
