@@ -259,6 +259,45 @@ def copy_path(src: Path, dst: Path):
         shutil.copy2(src, dst)
 
 
+def ensure_destination_schema(src_con, dst_con, table_names: set[str], skip_tables: set[str]):
+    managed_tables = table_names - skip_tables
+    table_rows = src_con.execute(
+        """
+        select name, sql
+        from sqlite_master
+        where type='table' and name not like 'sqlite_%'
+        """
+    ).fetchall()
+    dst_tables = {
+        row[0]
+        for row in dst_con.execute(
+            "select name from sqlite_master where type='table' and name not like 'sqlite_%'"
+        )
+    }
+    for name, sql in table_rows:
+        if name in managed_tables and name not in dst_tables and sql:
+            dst_con.execute(sql)
+
+    extra_rows = src_con.execute(
+        """
+        select type, name, tbl_name, sql
+        from sqlite_master
+        where type in ('index', 'trigger', 'view')
+          and name not like 'sqlite_%'
+          and sql is not null
+        """
+    ).fetchall()
+    existing = {
+        (row[0], row[1])
+        for row in dst_con.execute(
+            "select type, name from sqlite_master where name not like 'sqlite_%'"
+        )
+    }
+    for object_type, name, tbl_name, sql in extra_rows:
+        if tbl_name in managed_tables and (object_type, name) not in existing and sql:
+            dst_con.execute(sql)
+
+
 def create_clean_helium_template(helium_binary: Path, keep: bool) -> Path:
     temp_root = Path(tempfile.mkdtemp(prefix="helium-template-"))
     proc = subprocess.Popen(
@@ -328,8 +367,9 @@ def import_database(
     plan = DB_PLANS[db_name]
     src = src_root / db_name
     dst = dst_root / db_name
-    if not src.exists() or not dst.exists():
+    if not src.exists():
         return
+    dst.parent.mkdir(parents=True, exist_ok=True)
 
     src_con = sqlite3.connect(src)
     dst_con = sqlite3.connect(dst)
@@ -340,6 +380,13 @@ def import_database(
                 "select name from sqlite_master where type='table' and name not like 'sqlite_%'"
             )
         }
+        dst_tables = {
+            row[0]
+            for row in dst_con.execute(
+                "select name from sqlite_master where type='table' and name not like 'sqlite_%'"
+            )
+        }
+        ensure_destination_schema(src_con, dst_con, src_tables, plan["skip_tables"])
         dst_tables = {
             row[0]
             for row in dst_con.execute(
@@ -404,6 +451,8 @@ def copy_profile_overlay(src_root: Path, dst_root: Path, include_site_storage: b
 
 
 def count_bookmarks(bookmarks_path: Path):
+    if not bookmarks_path.exists():
+        return {"bookmark_bar": 0, "other": 0, "synced": 0}
     data = json.loads(bookmarks_path.read_text())
     roots = data["roots"]
 
@@ -425,18 +474,38 @@ def count_bookmarks(bookmarks_path: Path):
 def verify_profile(profile_root: Path):
     summary = {"Bookmarks": count_bookmarks(profile_root / "Bookmarks")}
     for db_name, table in VERIFY_TABLES:
-        con = sqlite3.connect(profile_root / db_name)
+        db_path = profile_root / db_name
+        if not db_path.exists():
+            summary[db_name] = None
+            continue
+        con = sqlite3.connect(db_path)
         try:
-            summary[db_name] = con.execute(f"select count(*) from {table}").fetchone()[0]
+            row = con.execute(
+                "select name from sqlite_master where type='table' and name=?",
+                (table,),
+            ).fetchone()
+            summary[db_name] = (
+                con.execute(f"select count(*) from {table}").fetchone()[0] if row else None
+            )
         finally:
             con.close()
 
-    con = sqlite3.connect(profile_root / "Web Data")
+    web_data_path = profile_root / "Web Data"
+    if not web_data_path.exists():
+        for table in VERIFY_WEB_DATA:
+            summary[f"Web Data {table}"] = None
+        return summary
+
+    con = sqlite3.connect(web_data_path)
     try:
         for table in VERIFY_WEB_DATA:
-            summary[f"Web Data {table}"] = con.execute(
-                f"select count(*) from {table}"
-            ).fetchone()[0]
+            row = con.execute(
+                "select name from sqlite_master where type='table' and name=?",
+                (table,),
+            ).fetchone()
+            summary[f"Web Data {table}"] = (
+                con.execute(f"select count(*) from {table}").fetchone()[0] if row else None
+            )
     finally:
         con.close()
     return summary
@@ -535,7 +604,7 @@ def main():
     helium_key = derive_key(helium_secret)
 
     brave_state = json.loads((args.brave_root / "Local State").read_text())
-    requested = args.profiles.split(",") if args.profiles else None
+    requested = [item.strip() for item in args.profiles.split(",")] if args.profiles else None
     profile_names = selected_profiles(args.brave_root, brave_state, requested)
     if not profile_names:
         raise SystemExit("No Brave profiles selected for migration")

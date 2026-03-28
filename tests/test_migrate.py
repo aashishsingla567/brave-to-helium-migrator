@@ -166,6 +166,101 @@ class MigrateTests(unittest.TestCase):
             self.assertEqual(row[0], "alice")
             self.assertEqual(decrypt_v10(row[1], helium_secret), b"super-secret")
 
+    def test_import_database_creates_missing_destination_table(self):
+        brave_secret = "brave-secret"
+        helium_secret = "helium-secret"
+        brave_key = MODULE.derive_key(brave_secret)
+        helium_key = MODULE.derive_key(helium_secret)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src_root = root / "src"
+            dst_root = root / "dst"
+            src_root.mkdir()
+            dst_root.mkdir()
+            src_db = src_root / "Cookies"
+            dst_db = dst_root / "Cookies"
+
+            src_con = sqlite3.connect(src_db)
+            src_con.execute("create table meta(key text primary key, value text)")
+            src_con.execute(
+                "create table cookies(host_key text, encrypted_value blob)"
+            )
+            src_con.execute(
+                "insert into cookies values(?, ?)",
+                ("example.com", encrypt_v10(b'cookie-secret', brave_secret)),
+            )
+            src_con.commit()
+            src_con.close()
+
+            dst_con = sqlite3.connect(dst_db)
+            dst_con.execute("create table meta(key text primary key, value text)")
+            dst_con.commit()
+            dst_con.close()
+
+            MODULE.import_database("Cookies", src_root, dst_root, brave_key, helium_key)
+
+            con = sqlite3.connect(dst_db)
+            row = con.execute(
+                "select host_key, encrypted_value from cookies"
+            ).fetchone()
+            con.close()
+
+            self.assertEqual(row[0], "example.com")
+            self.assertEqual(decrypt_v10(row[1], helium_secret), b"cookie-secret")
+
+    def test_import_database_creates_missing_destination_db_file(self):
+        brave_secret = "brave-secret"
+        helium_secret = "helium-secret"
+        brave_key = MODULE.derive_key(brave_secret)
+        helium_key = MODULE.derive_key(helium_secret)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src_root = root / "src"
+            dst_root = root / "dst"
+            src_root.mkdir()
+            dst_root.mkdir()
+            src_db = src_root / "Cookies"
+
+            src_con = sqlite3.connect(src_db)
+            src_con.execute("create table cookies(host_key text, encrypted_value blob)")
+            src_con.execute(
+                "create index cookies_host_key_idx on cookies(host_key)"
+            )
+            src_con.execute(
+                "insert into cookies values(?, ?)",
+                ("example.org", encrypt_v10(b'cookie-secret-2', brave_secret)),
+            )
+            src_con.commit()
+            src_con.close()
+
+            MODULE.import_database("Cookies", src_root, dst_root, brave_key, helium_key)
+
+            dst_db = dst_root / "Cookies"
+            self.assertTrue(dst_db.exists())
+            con = sqlite3.connect(dst_db)
+            row = con.execute(
+                "select host_key, encrypted_value from cookies"
+            ).fetchone()
+            idx = con.execute(
+                "select name from sqlite_master where type='index' and name='cookies_host_key_idx'"
+            ).fetchone()
+            con.close()
+
+            self.assertEqual(row[0], "example.org")
+            self.assertEqual(decrypt_v10(row[1], helium_secret), b"cookie-secret-2")
+            self.assertIsNotNone(idx)
+
+    def test_verify_profile_tolerates_missing_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            root.mkdir(exist_ok=True)
+            summary = MODULE.verify_profile(root)
+            self.assertEqual(summary["Bookmarks"], {"bookmark_bar": 0, "other": 0, "synced": 0})
+            self.assertIsNone(summary["Login Data"])
+            self.assertIsNone(summary["Web Data autofill"])
+
 
 if __name__ == "__main__":
     unittest.main()
