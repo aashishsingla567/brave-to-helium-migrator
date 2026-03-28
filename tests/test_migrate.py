@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 
@@ -260,6 +261,75 @@ class MigrateTests(unittest.TestCase):
             self.assertEqual(summary["Bookmarks"], {"bookmark_bar": 0, "other": 0, "synced": 0})
             self.assertIsNone(summary["Login Data"])
             self.assertIsNone(summary["Web Data autofill"])
+
+    def test_resolve_safe_storage_secrets_uses_cache_without_keychain(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "secrets.json"
+            MODULE.write_secret_cache(
+                cache_path,
+                {
+                    "brave_safe_storage": "brave-cached",
+                    "helium_safe_storage": "helium-cached",
+                },
+            )
+            args = SimpleNamespace(
+                brave_safe_storage=None,
+                helium_safe_storage=None,
+                keychain_password="ignored",
+                keychain_path=Path("/tmp/login.keychain-db"),
+                secret_cache_path=cache_path,
+            )
+            with mock.patch.object(MODULE, "unlock_keychain") as unlock_mock, mock.patch.object(
+                MODULE, "keychain_secret"
+            ) as secret_mock:
+                brave_secret, helium_secret = MODULE.resolve_safe_storage_secrets(args)
+            self.assertEqual((brave_secret, helium_secret), ("brave-cached", "helium-cached"))
+            unlock_mock.assert_not_called()
+            secret_mock.assert_not_called()
+
+    def test_resolve_safe_storage_secrets_writes_cache_after_keychain_lookup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "secrets.json"
+            args = SimpleNamespace(
+                brave_safe_storage=None,
+                helium_safe_storage=None,
+                keychain_password="pw",
+                keychain_path=Path("/tmp/login.keychain-db"),
+                secret_cache_path=cache_path,
+            )
+            with mock.patch.object(MODULE, "unlock_keychain") as unlock_mock, mock.patch.object(
+                MODULE,
+                "keychain_secret",
+                side_effect=["brave-live", "helium-live"],
+            ) as secret_mock:
+                brave_secret, helium_secret = MODULE.resolve_safe_storage_secrets(args)
+            self.assertEqual((brave_secret, helium_secret), ("brave-live", "helium-live"))
+            unlock_mock.assert_called_once()
+            self.assertEqual(secret_mock.call_count, 2)
+            payload = MODULE.load_secret_cache(cache_path)
+            self.assertEqual(payload["brave_safe_storage"], "brave-live")
+            self.assertEqual(payload["helium_safe_storage"], "helium-live")
+
+    def test_resolve_safe_storage_secrets_persists_explicit_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "secrets.json"
+            args = SimpleNamespace(
+                brave_safe_storage="brave-explicit",
+                helium_safe_storage="helium-explicit",
+                keychain_password=None,
+                keychain_path=Path("/tmp/login.keychain-db"),
+                secret_cache_path=cache_path,
+            )
+            with mock.patch.object(MODULE, "unlock_keychain") as unlock_mock, mock.patch.object(
+                MODULE, "keychain_secret"
+            ) as secret_mock:
+                brave_secret, helium_secret = MODULE.resolve_safe_storage_secrets(args)
+            self.assertEqual((brave_secret, helium_secret), ("brave-explicit", "helium-explicit"))
+            unlock_mock.assert_not_called()
+            secret_mock.assert_not_called()
+            payload = MODULE.load_secret_cache(cache_path)
+            self.assertEqual(payload["brave_safe_storage"], "brave-explicit")
+            self.assertEqual(payload["helium_safe_storage"], "helium-explicit")
 
 
 if __name__ == "__main__":
